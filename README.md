@@ -18,11 +18,11 @@ Vercel serves the built app and runs the two functions in `api/` (`auth.js`, `st
 1. Create a free cluster at [MongoDB Atlas](https://www.mongodb.com/atlas). Add a database user, then under **Network Access** allow `0.0.0.0/0`, since Vercel's IP addresses change.
 2. In Vercel, go to **Project → Settings → Environment Variables** and add:
    - `PASS_TOKEN`: your access token
-   - `MONGODB_URI`: the Atlas connection string (`mongodb+srv://…`)
-   - `MONGODB_DB` (optional, default `habitech`)
+   - `MONGODB_URI` (or `MONGO_DB`): the Atlas connection string (`mongodb+srv://…/habitech?…`)
+   - `MONGODB_DB` (optional): overrides the database name in the URI (default `habitech`)
 3. Redeploy (push to `master`, or use **Deployments → Redeploy**).
 
-Locally, the app keeps using `storage.json` unless you put `MONGODB_URI` in `.env`.
+Locally, the app uses `storage.json` unless `.env` has a MongoDB URI. For example, `MONGO_DB=mongodb://localhost:27017/habitech` makes the local app use the same MongoDB storage as production.
 
 ## Access token
 

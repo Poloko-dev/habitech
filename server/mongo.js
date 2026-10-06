@@ -1,15 +1,30 @@
-// MongoDB backing for the API (used on Vercel, and locally when MONGODB_URI is set).
+// MongoDB backing for the API (used on Vercel, and locally when MONGODB_URI / MONGO_DB is set).
 //   habitech.storage        – one document { _id: 'storage', data, updatedAt }
 //   habitech.auth_attempts  – wrong-token counters per IP (expire automatically)
 import { MongoClient } from 'mongodb';
 import { normalize, EMPTY } from './storageApi.js';
 
+/**
+ * Connection settings from env. The URI may be given as MONGODB_URI or MONGO_DB;
+ * the database name comes from MONGODB_DB, else the URI path, else 'habitech'.
+ */
+export function mongoConfig(env = process.env) {
+  const uri = env.MONGODB_URI || env.MONGO_DB || '';
+  let fromUri = '';
+  try {
+    fromUri = decodeURIComponent(new URL(uri).pathname.replace(/^\//, ''));
+  } catch {
+    /* not a parseable URL */
+  }
+  return { uri, dbName: env.MONGODB_DB || fromUri || 'habitech' };
+}
+
 // Reuse one connection across warm serverless invocations.
 const cache = globalThis.__habitechMongo || (globalThis.__habitechMongo = {});
 
-export function getDb(uri = process.env.MONGODB_URI, dbName = process.env.MONGODB_DB || 'habitech') {
+export function getDb(uri = mongoConfig().uri, dbName = mongoConfig().dbName) {
   if (!uri) {
-    return Promise.reject(Object.assign(new Error('MONGODB_URI is not set on the server'), { status: 503 }));
+    return Promise.reject(Object.assign(new Error('MONGODB_URI (or MONGO_DB) is not set on the server'), { status: 503 }));
   }
   if (!cache.db) {
     const client = new MongoClient(uri, { maxPoolSize: 5, serverSelectionTimeoutMS: 8000 });
