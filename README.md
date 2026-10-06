@@ -1,38 +1,49 @@
 # Habitech — Habit Tracker
 
-React habit tracker. Data is stored in `./storage.json` locally, or in MongoDB on Vercel.
+React habit tracker with MongoDB storage (local MongoDB for development, Atlas when hosted).
 
-## Run
+## Run locally with MongoDB
 
-```bash
-npm install
-npm run dev          # http://localhost:5173 (dev server + storage API)
-```
+1. Start MongoDB on your machine (for example as a Windows service, or with `mongod`).
+2. Create a `.env` in the project folder (see `.env.example`):
+   ```
+   MONGO_DB=mongodb://localhost:27017/habitech
+   ```
+3. Install and start:
+   ```bash
+   npm install
+   npm run dev          # http://localhost:5173
+   ```
+4. **First launch:** the app asks you to **create your access token**. From then on, you enter that token to unlock.
 
-Production: `npm run build && npm start` (http://localhost:4173, override with `PORT`).
+All data (habits, check-ins, notes, focus sessions) and the hashed token are stored in the `habitech` database, which is named in the URI. Without `MONGO_DB`, the app falls back to `./storage.json` and `./.habitech-auth.json`.
 
-## Deploying to Vercel (data in MongoDB)
-
-Vercel serves the built app and runs the two functions in `api/` (`auth.js`, `storage.js`) automatically. There's no server to manage. Vercel can't keep files between requests, so in production the data lives in MongoDB instead of `storage.json`.
-
-1. Create a free cluster at [MongoDB Atlas](https://www.mongodb.com/atlas). Add a database user, then under **Network Access** allow `0.0.0.0/0`, since Vercel's IP addresses change.
-2. In Vercel, go to **Project → Settings → Environment Variables** and add:
-   - `PASS_TOKEN`: your access token
-   - `MONGODB_URI` (or `MONGO_DB`): the Atlas connection string (`mongodb+srv://…/habitech?…`)
-   - `MONGODB_DB` (optional): overrides the database name in the URI (default `habitech`)
-3. Redeploy (push to `master`, or use **Deployments → Redeploy**).
-
-Locally, the app uses `storage.json` unless `.env` has a MongoDB URI. For example, `MONGO_DB=mongodb://localhost:27017/habitech` makes the local app use the same MongoDB storage as production.
+To run without the dev server: `npm run build && npm start` (http://localhost:4173, override with `PORT`).
 
 ## Access token
 
-The app is locked until you enter the token set as `PASS_TOKEN` in `.env` (see `.env.example`).
+- **Created in the app:** on first launch you choose the token. It's stored **hashed** with scrypt and a random salt in MongoDB (`habitech.settings`, document `_id: "auth"`), never in plain text and never in the browser code.
+- **Changing it:** **Settings → Security → Change token** asks for the current token. Changing it signs out every other browser.
+- **Unlock session:** a correct token sets a signed, HttpOnly cookie that lasts 7 days. **Lock app** (sidebar lock icon or **Settings → Lock app**) clears it in that browser.
+- **Locked data:** `/api/storage` returns 401 without a session, and `storage.json` can't be downloaded directly.
+- **Wrong tokens:** after 5 wrong attempts there's a 30-second cool-down.
+- **`PASS_TOKEN` (optional):** if set as an environment variable, it takes priority over the stored token and can't be changed in the app. That's useful for hosted deployments.
 
-- The token is checked **only on the server** (`server/auth.js`) and is never included in the browser code. Don't rename it to `VITE_PASS_TOKEN`, because Vite would then publish it to the browser.
-- A correct token sets a signed, HttpOnly session cookie that lasts 7 days. **Lock app** (sidebar lock icon or **Settings → Lock app**) clears it in that browser. Changing `PASS_TOKEN` signs out every browser.
-- `/api/storage` returns 401 without a session, and `/storage.json` can't be downloaded directly.
-- After 5 wrong tokens there is a 30-second cool-down.
-- After changing `.env`, restart `npm start`. The dev server restarts on its own. On Vercel, redeploy after changing environment variables.
+### Reset a forgotten token
+
+Delete the stored token, then reload the app. It will ask you to create a new one. Your habit data is not touched.
+
+```bash
+mongosh "mongodb://localhost:27017/habitech" --eval 'db.settings.deleteOne({ _id: "auth" })'
+```
+
+Without MongoDB, delete `./.habitech-auth.json` instead.
+
+## Deploying to Vercel (later)
+
+Vercel serves the built app and runs the two functions in `api/` (`auth.js`, `storage.js`). Vercel can't keep files, so production needs a hosted MongoDB such as [Atlas](https://www.mongodb.com/atlas). Under Atlas **Network Access**, allow `0.0.0.0/0`.
+
+In Vercel, go to **Project → Settings → Environment Variables** and add `MONGODB_URI` (or `MONGO_DB`) with the Atlas connection string, then redeploy. `PASS_TOKEN` is optional there too. Without it, the first person to open the deployed site creates the token, so open it yourself right after deploying, or set `PASS_TOKEN`.
 
 ## Storage
 

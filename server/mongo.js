@@ -1,6 +1,7 @@
 // MongoDB backing for the API (used on Vercel, and locally when MONGODB_URI / MONGO_DB is set).
 //   habitech.storage        – one document { _id: 'storage', data, updatedAt }
 //   habitech.auth_attempts  – wrong-token counters per IP (expire automatically)
+//   habitech.settings       – the hashed access token created in the app
 import { MongoClient } from 'mongodb';
 import { normalize, EMPTY } from './storageApi.js';
 
@@ -77,6 +78,30 @@ export function mongoAttempts(opts = {}) {
     },
     async clear(ip) {
       await (await col()).deleteOne({ _id: ip });
+    },
+  };
+}
+
+/** Hashed access token created in the app: habitech.settings { _id: 'auth', hash, salt, sessionKey } */
+export function mongoTokenStore(opts = {}) {
+  const col = async () => (await getDb(opts.uri, opts.dbName)).collection('settings');
+  return {
+    async get() {
+      const doc = await (await col()).findOne({ _id: 'auth' });
+      if (!doc) return null;
+      const { _id, ...rec } = doc;
+      return rec;
+    },
+    async create(rec) {
+      try {
+        await (await col()).insertOne({ _id: 'auth', ...rec }); // unique _id: only one token can be created
+      } catch (err) {
+        if (err.code === 11000) throw Object.assign(new Error('A token already exists'), { status: 409 });
+        throw err;
+      }
+    },
+    async update(rec) {
+      await (await col()).replaceOne({ _id: 'auth' }, { _id: 'auth', ...rec }, { upsert: true });
     },
   };
 }

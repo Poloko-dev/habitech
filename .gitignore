@@ -7,3 +7,6 @@ storage.json.tmp
 
 # Personal habit data – created automatically on first run
 storage.json
+
+# Hashed access token when running without MongoDB
+.habitech-auth.json

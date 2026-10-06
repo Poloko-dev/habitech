@@ -1,33 +1,56 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './ui.jsx';
-import { unlock } from '../lib/auth.js';
+import { unlock, setupToken } from '../lib/auth.js';
 import { formatLong, todayKey } from '../lib/dates.js';
 
-/**
- * Shown until the correct PASS_TOKEN is entered. Behind the form is a blurred
- * mock-up of the Today page – no real data is loaded while locked.
- */
-export function LockScreen({ configured, onUnlocked }) {
-  const [token, setToken] = useState('');
+const MIN_TOKEN = 8;
+const UNREACHABLE = 'Can’t reach the server. Is it running?';
+
+/** Password-style input with a show/hide toggle. */
+export function TokenField({ id, label, value, onChange, inputRef, autoComplete, disabled, invalid, describedBy, placeholder }) {
   const [show, setShow] = useState(false);
+  return (
+    <div className="field">
+      <label htmlFor={id} className={placeholder ? 'sr-only' : undefined}>{label}</label>
+      <div className="token-input">
+        <input id={id} ref={inputRef} className="input" type={show ? 'text' : 'password'} autoComplete={autoComplete}
+          placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
+          aria-invalid={invalid || undefined} aria-describedby={describedBy} />
+        <button type="button" className="token-eye" onClick={() => setShow((s) => !s)}
+          aria-label={show ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} title={show ? 'Hide' : 'Show'}>
+          <Icon name={show ? 'eyeOff' : 'eye'} size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shown until the app is unlocked. On first launch (no token yet) it asks the user to
+ * create one, which the server stores hashed. Behind the form is a blurred mock-up of
+ * the Today page – no real data is loaded while locked.
+ */
+export function LockScreen({ setupRequired, statusError, onUnlocked, onRetry }) {
+  const [token, setToken] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(0);
   const input = useRef(null);
 
-  useEffect(() => input.current?.focus(), []);
+  useEffect(() => input.current?.focus(), [setupRequired]);
   useEffect(() => {
     if (wait <= 0) return undefined;
     const t = setTimeout(() => setWait((w) => w - 1), 1000);
     return () => clearTimeout(t);
   }, [wait]);
 
-  const submit = async (e) => {
+  const submitUnlock = async (e) => {
     e.preventDefault();
     if (!token.trim() || busy || wait > 0) return;
     setBusy(true);
     setError('');
-    const res = await unlock(token).catch(() => ({ ok: false, error: 'Can’t reach the server. Is it running?' }));
+    const res = await unlock(token).catch(() => ({ ok: false, error: UNREACHABLE }));
     setBusy(false);
     if (res.ok) return onUnlocked();
     setError(res.error);
@@ -36,46 +59,72 @@ export function LockScreen({ configured, onUnlocked }) {
     input.current?.focus();
   };
 
+  const submitSetup = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    if (token.trim().length < MIN_TOKEN) return setError(`Use at least ${MIN_TOKEN} characters.`);
+    if (token !== confirm) return setError('The two tokens don’t match.');
+    setBusy(true);
+    setError('');
+    const res = await setupToken(token).catch(() => ({ ok: false, error: UNREACHABLE }));
+    setBusy(false);
+    if (res.ok) return onUnlocked();
+    setError(res.error);
+  };
+
+  let body;
+  if (statusError) {
+    body = (
+      <>
+        <h1 id="lock-title">Can’t reach your data</h1>
+        <p className="lock-warn" role="alert">{statusError}</p>
+        <button type="button" className="btn btn-primary lock-submit" onClick={onRetry}>Try again</button>
+      </>
+    );
+  } else if (setupRequired) {
+    body = (
+      <>
+        <h1 id="lock-title">Create your access token</h1>
+        <p className="muted">Choose a token to protect your habits. You’ll enter it to unlock the app. It’s stored securely (hashed) in your database.</p>
+        <TokenField id="setup-token" label="New access token" value={token} onChange={setToken} inputRef={input}
+          autoComplete="new-password" invalid={Boolean(error)} />
+        <TokenField id="setup-confirm" label="Confirm token" value={confirm} onChange={setConfirm}
+          autoComplete="new-password" invalid={Boolean(error)} describedBy={error ? 'lock-error' : undefined} />
+        <p className="muted small lock-hint">At least {MIN_TOKEN} characters. If you forget it, see “Reset a forgotten token” in the README.</p>
+        {error && <p id="lock-error" className="error-text" role="alert">{error}</p>}
+        <button type="submit" className="btn btn-primary lock-submit" disabled={busy || !token || !confirm}>
+          <Icon name="lock" size={16} />{busy ? 'Saving…' : 'Create token & unlock'}
+        </button>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <h1 id="lock-title">Habitech is locked</h1>
+        <p className="muted">Enter your access token to continue.</p>
+        <TokenField id="lock-token" label="Access token" placeholder="Access token" value={token} onChange={setToken}
+          inputRef={input} autoComplete="current-password" disabled={wait > 0} invalid={Boolean(error)}
+          describedBy={error ? 'lock-error' : undefined} />
+        {(error || wait > 0) && (
+          <p id="lock-error" className="error-text" role="alert">
+            {wait > 0 ? `Too many attempts. Try again in ${wait}s.` : error}
+          </p>
+        )}
+        <button type="submit" className="btn btn-primary lock-submit" disabled={busy || wait > 0 || !token.trim()}>
+          <Icon name="lock" size={16} />{busy ? 'Checking…' : 'Unlock'}
+        </button>
+      </>
+    );
+  }
+
   return (
     <div className="lock">
       <MockToday />
 
       <div className="lock-overlay">
-        <form className="lock-card" onSubmit={submit} aria-labelledby="lock-title">
+        <form className="lock-card" onSubmit={setupRequired ? submitSetup : submitUnlock} aria-labelledby="lock-title">
           <div className="lock-icon"><Icon name="lock" size={24} /></div>
-          <h1 id="lock-title">Habitech is locked</h1>
-          <p className="muted">Enter your access token to continue.</p>
-
-          {configured ? (
-            <>
-              <div className="field">
-                <label htmlFor="lock-token" className="sr-only">Access token</label>
-                <div className="token-input">
-                  <input id="lock-token" ref={input} className="input" type={show ? 'text' : 'password'}
-                    autoComplete="current-password" placeholder="Access token" value={token}
-                    onChange={(e) => setToken(e.target.value)} disabled={wait > 0}
-                    aria-invalid={Boolean(error)} aria-describedby={error ? 'lock-error' : undefined} />
-                  <button type="button" className="token-eye" onClick={() => setShow((s) => !s)}
-                    aria-label={show ? 'Hide token' : 'Show token'} title={show ? 'Hide token' : 'Show token'}>
-                    <Icon name={show ? 'eyeOff' : 'eye'} size={18} />
-                  </button>
-                </div>
-              </div>
-              {(error || wait > 0) && (
-                <p id="lock-error" className="error-text" role="alert">
-                  {wait > 0 ? `Too many attempts. Try again in ${wait}s.` : error}
-                </p>
-              )}
-              <button type="submit" className="btn btn-primary lock-submit" disabled={busy || wait > 0 || !token.trim()}>
-                <Icon name="lock" size={16} />{busy ? 'Checking…' : 'Unlock'}
-              </button>
-            </>
-          ) : (
-            <p className="lock-warn" role="alert">
-              No <code>PASS_TOKEN</code> is set. Add <code>PASS_TOKEN=your-token</code> to the <code>.env</code> file
-              in the project folder, then restart the server.
-            </p>
-          )}
+          {body}
         </form>
       </div>
     </div>

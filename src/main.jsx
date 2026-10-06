@@ -1,31 +1,39 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import { LockScreen } from './components/LockScreen.jsx';
 import { authStatus, LOCKED_EVENT } from './lib/auth.js';
 import './styles.css';
 
-/** Shows the lock screen until the server confirms a valid PASS_TOKEN session. */
+/** Shows the lock screen (or first-launch token setup) until the server confirms a session. */
 function AuthGate() {
-  const [state, setState] = useState({ status: 'checking', configured: true });
+  const [state, setState] = useState({ status: 'checking', setupRequired: false, error: '' });
   const [session, setSession] = useState(0); // remounts App after each unlock
 
-  useEffect(() => {
+  const check = useCallback(() => {
     authStatus()
-      .then((s) => setState({ status: s.authenticated ? 'unlocked' : 'locked', configured: s.configured }))
-      .catch(() => setState({ status: 'locked', configured: true }));
-    const onLocked = () => setState((s) => ({ ...s, status: 'locked' }));
+      .then((s) => setState({ status: s.authenticated ? 'unlocked' : 'locked', setupRequired: s.setupRequired, error: '' }))
+      .catch((err) => {
+        // e.g. MongoDB isn't running – show the server's message instead of a token form.
+        setState({ status: 'locked', setupRequired: false, error: err.message || 'Can’t reach the server.' });
+      });
+  }, []);
+
+  useEffect(() => {
+    check();
+    const onLocked = () => check();
     window.addEventListener(LOCKED_EVENT, onLocked);
     return () => window.removeEventListener(LOCKED_EVENT, onLocked);
-  }, []);
+  }, [check]);
 
   if (state.status === 'checking') return null;
   if (state.status === 'locked') {
     return (
-      <LockScreen configured={state.configured} onUnlocked={() => {
-        setSession((n) => n + 1);
-        setState((s) => ({ ...s, status: 'unlocked' }));
-      }} />
+      <LockScreen setupRequired={state.setupRequired} statusError={state.error} onRetry={check}
+        onUnlocked={() => {
+          setSession((n) => n + 1);
+          setState({ status: 'unlocked', setupRequired: false, error: '' });
+        }} />
     );
   }
   return <App key={session} />;

@@ -125,13 +125,15 @@ export function createApi(auth, store = fileStore) {
   return function apiMiddleware(req, res, next) {
     const url = decodeURIComponent((req.url || '').split('?')[0]);
 
-    // The data file must only be reachable through the authenticated API – the Vite
-    // dev server would otherwise serve it as a static file.
-    if (/^\/storage\.json/i.test(url)) return send(res, 404, { error: 'Not found' });
+    // Data and token files must only be reachable through the authenticated API – the
+    // Vite dev server would otherwise serve them as static files.
+    if (/^\/(storage\.json|\.habitech-auth)/i.test(url)) return send(res, 404, { error: 'Not found' });
 
     if (url === '/api/auth') return void auth.handle(req, res, readBody, send).catch(fail(res));
     if (url !== '/api/storage') return next ? next() : send(res, 404, { error: 'Not found' });
-    if (!auth.isAuthed(req)) return send(res, 401, { error: 'Locked' });
-    return void handleStorage(req, res, store).catch(fail(res));
+    return void auth
+      .isAuthed(req)
+      .then((ok) => (ok ? handleStorage(req, res, store) : send(res, 401, { error: 'Locked' })))
+      .catch(fail(res));
   };
 }

@@ -11,7 +11,7 @@ import { createLocalApi } from './backend.js';
 
 // Real environment variables win over .env.
 const env = { ...readEnvFile(ROOT), ...process.env };
-const { api, backend, configured } = createLocalApi(env);
+const { api, backend } = createLocalApi(env);
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const PORT = Number(process.env.PORT) || 4173;
@@ -54,5 +54,4 @@ http
   .listen(PORT, () => {
     console.log(`Habitech running at http://localhost:${PORT}`);
     console.log(`Data: ${backend === 'storage.json' ? STORAGE_FILE : backend}`);
-    if (!configured) console.warn('PASS_TOKEN is not set in .env – the app will stay locked.');
   });

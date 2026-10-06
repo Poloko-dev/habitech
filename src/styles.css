@@ -356,6 +356,15 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .lock-card .error-text { margin: -4px 0 0; text-align: left; }
 .lock-warn { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 13px; }
 .lock-warn code { background: rgba(255, 255, 255, 0.7); padding: 1px 5px; border-radius: 4px; }
+.lock-card .field { text-align: left; }
+.lock-card .field label:not(.sr-only) { font-size: 13px; }
+.lock-hint { margin-top: -6px; text-align: left; }
+.token-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.token-form { display: grid; gap: 12px; margin-top: 14px; max-width: 420px; }
+.token-form .token-input .input { height: 42px; }
+.token-form-actions { display: flex; gap: 8px; }
+.ok-text { color: var(--good); font-size: 12px; margin-top: 8px; }
+.data-row .error-text { margin-top: 8px; }
 .sidebar-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .lock-btn {
   width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15);
