@@ -1,6 +1,9 @@
-// Token gate for the app. The PASS_TOKEN from .env is only ever read here, on the
-// server – it is never sent to the browser. A correct token gets an HttpOnly session
-// cookie; /api/storage refuses requests without one.
+// Token gate for the app. PASS_TOKEN is only ever read on the server – it is never
+// sent to the browser. A correct token gets a signed, HttpOnly session cookie.
+//
+// Sessions are stateless (an expiry time signed with a key derived from PASS_TOKEN),
+// so they work on serverless hosts like Vercel where memory isn't kept between
+// requests. Changing PASS_TOKEN signs everyone out.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,12 +32,10 @@ export function readEnvFile(dir) {
   return out;
 }
 
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest();
+
 // Constant-time comparison (hashing first makes the lengths equal).
-const sameToken = (a, b) =>
-  crypto.timingSafeEqual(
-    crypto.createHash('sha256').update(String(a)).digest(),
-    crypto.createHash('sha256').update(String(b)).digest(),
-  );
+const sameToken = (a, b) => crypto.timingSafeEqual(sha256(a), sha256(b));
 
 function parseCookies(req) {
   return Object.fromEntries(
@@ -46,73 +47,86 @@ function parseCookies(req) {
   );
 }
 
-export function createAuth(passToken) {
+/** In-process attempt counter (local dev / single server). */
+export function memoryAttempts() {
+  const map = new Map();
+  return {
+    get: async (ip) => map.get(ip) || { fails: 0, lockedUntil: 0 },
+    set: async (ip, rec) => void map.set(ip, rec),
+    clear: async (ip) => void map.delete(ip),
+  };
+}
+
+const clientIp = (req) =>
+  String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'local';
+
+const isHttps = (req) => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket?.encrypted);
+
+/**
+ * @param passToken  value of PASS_TOKEN
+ * @param attempts   { get, set, clear } store for wrong-token counting
+ */
+export function createAuth(passToken, attempts = memoryAttempts()) {
   const token = (passToken || '').trim();
-  const sessions = new Map(); // id -> expiresAt
-  const attempts = new Map(); // ip -> { fails, lockedUntil }
+  const key = sha256(`habitech-session:${token}`);
+  const sign = (exp) => crypto.createHmac('sha256', key).update(String(exp)).digest('base64url');
 
   const isAuthed = (req) => {
-    const id = parseCookies(req)[COOKIE];
-    const exp = id && sessions.get(id);
-    if (!exp) return false;
-    if (exp < Date.now()) {
-      sessions.delete(id);
-      return false;
-    }
-    return true;
+    if (!token) return false;
+    const [exp, sig] = (parseCookies(req)[COOKIE] || '').split('.');
+    if (!exp || !sig || !(Number(exp) > Date.now())) return false;
+    const expected = Buffer.from(sign(exp));
+    const given = Buffer.from(sig);
+    return given.length === expected.length && crypto.timingSafeEqual(given, expected);
   };
 
-  const cookie = (id, maxAgeSec) =>
-    `${COOKIE}=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`;
+  const cookie = (req, value, maxAgeSec) =>
+    `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}${isHttps(req) ? '; Secure' : ''}`;
 
-  /** Handles GET/POST/DELETE /api/auth. Returns true if it handled the request. */
-  async function handle(req, res, url, readBody, send) {
-    if (url !== '/api/auth') return false;
-    const ip = req.socket?.remoteAddress || 'local';
-
+  /** Handles GET/POST/DELETE on /api/auth. */
+  async function handle(req, res, readBody, send) {
     if (req.method === 'GET') {
-      send(res, 200, { authenticated: isAuthed(req), configured: Boolean(token) });
-    } else if (req.method === 'POST') {
-      if (!token) return send(res, 503, { error: 'PASS_TOKEN is not set in .env' }), true;
-      const a = attempts.get(ip) || { fails: 0, lockedUntil: 0 };
-      if (a.lockedUntil > Date.now()) {
-        const wait = Math.ceil((a.lockedUntil - Date.now()) / 1000);
-        return send(res, 429, { error: `Too many attempts. Try again in ${wait}s.`, retryAfter: wait }), true;
-      }
-      let given = '';
-      try {
-        given = JSON.parse(await readBody(req))?.token ?? '';
-      } catch {
-        /* treated as wrong token */
-      }
-      if (given && sameToken(given.trim(), token)) {
-        attempts.delete(ip);
-        const id = crypto.randomBytes(32).toString('hex');
-        sessions.set(id, Date.now() + SESSION_MS);
-        res.setHeader('Set-Cookie', cookie(id, SESSION_MS / 1000));
-        send(res, 200, { authenticated: true });
-      } else {
-        a.fails += 1;
-        if (a.fails >= MAX_FAILS) {
-          a.fails = 0;
-          a.lockedUntil = Date.now() + LOCKOUT_MS;
-          attempts.set(ip, a);
-          const wait = LOCKOUT_MS / 1000;
-          return send(res, 429, { error: `Too many attempts. Try again in ${wait}s.`, retryAfter: wait }), true;
-        }
-        attempts.set(ip, a);
-        send(res, 401, { error: 'That token doesn’t match.' });
-      }
-    } else if (req.method === 'DELETE') {
-      const id = parseCookies(req)[COOKIE];
-      if (id) sessions.delete(id);
-      res.setHeader('Set-Cookie', cookie('', 0));
-      send(res, 200, { authenticated: false });
-    } else {
-      res.setHeader('Allow', 'GET, POST, DELETE');
-      send(res, 405, { error: 'Method not allowed' });
+      return send(res, 200, { authenticated: isAuthed(req), configured: Boolean(token) });
     }
-    return true;
+    if (req.method === 'DELETE') {
+      res.setHeader('Set-Cookie', cookie(req, '', 0));
+      return send(res, 200, { authenticated: false });
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'GET, POST, DELETE');
+      return send(res, 405, { error: 'Method not allowed' });
+    }
+    if (!token) return send(res, 503, { error: 'PASS_TOKEN is not set on the server' });
+
+    const ip = clientIp(req);
+    const a = await attempts.get(ip);
+    if (a.lockedUntil > Date.now()) {
+      const wait = Math.ceil((a.lockedUntil - Date.now()) / 1000);
+      return send(res, 429, { error: `Too many attempts. Try again in ${wait}s.`, retryAfter: wait });
+    }
+
+    let given = '';
+    try {
+      given = JSON.parse(await readBody(req))?.token ?? '';
+    } catch {
+      /* treated as a wrong token */
+    }
+
+    if (given && sameToken(String(given).trim(), token)) {
+      await attempts.clear(ip);
+      const exp = Date.now() + SESSION_MS;
+      res.setHeader('Set-Cookie', cookie(req, `${exp}.${sign(exp)}`, SESSION_MS / 1000));
+      return send(res, 200, { authenticated: true });
+    }
+
+    const fails = a.fails + 1;
+    if (fails >= MAX_FAILS) {
+      await attempts.set(ip, { fails: 0, lockedUntil: Date.now() + LOCKOUT_MS });
+      const wait = LOCKOUT_MS / 1000;
+      return send(res, 429, { error: `Too many attempts. Try again in ${wait}s.`, retryAfter: wait });
+    }
+    await attempts.set(ip, { fails, lockedUntil: 0 });
+    return send(res, 401, { error: 'That token doesn’t match.' });
   }
 
   return { isAuthed, handle, configured: Boolean(token) };

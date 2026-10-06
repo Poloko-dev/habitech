@@ -1,6 +1,6 @@
 # Habitech — Habit Tracker
 
-React habit tracker that stores everything in `./storage.json`.
+React habit tracker. Data is stored in `./storage.json` locally, or in MongoDB on Vercel.
 
 ## Run
 
@@ -11,15 +11,28 @@ npm run dev          # http://localhost:5173 (dev server + storage API)
 
 Production: `npm run build && npm start` (http://localhost:4173, override with `PORT`).
 
+## Deploying to Vercel (data in MongoDB)
+
+Vercel serves the built app and runs the two functions in `api/` (`auth.js`, `storage.js`) automatically. There's no server to manage. Vercel can't keep files between requests, so in production the data lives in MongoDB instead of `storage.json`.
+
+1. Create a free cluster at [MongoDB Atlas](https://www.mongodb.com/atlas). Add a database user, then under **Network Access** allow `0.0.0.0/0`, since Vercel's IP addresses change.
+2. In Vercel, go to **Project → Settings → Environment Variables** and add:
+   - `PASS_TOKEN`: your access token
+   - `MONGODB_URI`: the Atlas connection string (`mongodb+srv://…`)
+   - `MONGODB_DB` (optional, default `habitech`)
+3. Redeploy (push to `master`, or use **Deployments → Redeploy**).
+
+Locally, the app keeps using `storage.json` unless you put `MONGODB_URI` in `.env`.
+
 ## Access token
 
 The app is locked until you enter the token set as `PASS_TOKEN` in `.env` (see `.env.example`).
 
 - The token is checked **only on the server** (`server/auth.js`) and is never included in the browser code. Don't rename it to `VITE_PASS_TOKEN`, because Vite would then publish it to the browser.
-- A correct token sets an HttpOnly session cookie that lasts 7 days, or until you lock the app (sidebar lock icon or **Settings → Lock app**) or restart the server.
+- A correct token sets a signed, HttpOnly session cookie that lasts 7 days. **Lock app** (sidebar lock icon or **Settings → Lock app**) clears it in that browser. Changing `PASS_TOKEN` signs out every browser.
 - `/api/storage` returns 401 without a session, and `/storage.json` can't be downloaded directly.
 - After 5 wrong tokens there is a 30-second cool-down.
-- After changing `.env`, restart `npm start`. The dev server restarts on its own.
+- After changing `.env`, restart `npm start`. The dev server restarts on its own. On Vercel, redeploy after changing environment variables.
 
 ## Storage
 

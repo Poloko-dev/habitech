@@ -1,14 +1,17 @@
-// Production server: serves the built app from ./dist and the storage API.
+// Self-hosted server: serves the built app from ./dist plus the API.
+// (On Vercel the API runs as functions in ./api instead.)
 // Run `npm run build` first, then `npm start`.
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApi, STORAGE_FILE, ROOT } from './storageApi.js';
-import { createAuth, readEnvFile } from './auth.js';
+import { STORAGE_FILE, ROOT } from './storageApi.js';
+import { readEnvFile } from './auth.js';
+import { createLocalApi } from './backend.js';
 
-const PASS_TOKEN = process.env.PASS_TOKEN ?? readEnvFile(ROOT).PASS_TOKEN;
-const api = createApi(createAuth(PASS_TOKEN));
+// Real environment variables win over .env.
+const env = { ...readEnvFile(ROOT), ...process.env };
+const { api, backend, configured } = createLocalApi(env);
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const PORT = Number(process.env.PORT) || 4173;
@@ -50,6 +53,6 @@ http
   .createServer((req, res) => api(req, res, () => serveStatic(req, res)))
   .listen(PORT, () => {
     console.log(`Habitech running at http://localhost:${PORT}`);
-    console.log(`Storage file: ${STORAGE_FILE}`);
-    if (!PASS_TOKEN) console.warn('PASS_TOKEN is not set in .env – the app will stay locked.');
+    console.log(`Data: ${backend === 'storage.json' ? STORAGE_FILE : backend}`);
+    if (!configured) console.warn('PASS_TOKEN is not set in .env – the app will stay locked.');
   });

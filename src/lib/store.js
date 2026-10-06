@@ -17,12 +17,15 @@ export function useStore() {
 
   useEffect(() => {
     fetch(API)
-      .then((r) => {
+      .then(async (r) => {
         if (r.status === 401) {
           notifyLocked(); // session expired or locked elsewhere
           throw new Error('Locked');
         }
-        if (!r.ok) throw new Error(`Could not load storage.json (${r.status})`);
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error || `Could not load your data (${r.status})`);
+        }
         return r.json();
       })
       .then((d) => {
@@ -49,7 +52,10 @@ export function useStore() {
         notifyLocked();
         throw new Error('Locked – unlock to save');
       }
-      if (!r.ok) throw new Error(`Save failed (${r.status})`);
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error || `Save failed (${r.status})`);
+      }
       setStatus(timer.current ? 'saving' : 'saved');
       setError(null);
     } catch (e) {

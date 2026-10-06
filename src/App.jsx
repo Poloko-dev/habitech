@@ -95,7 +95,7 @@ export default function App() {
       <div className="main" style={{ maxWidth: 640 }}>
         {status === 'error' ? (
           <div className="banner-error">
-            <span>{error}. Make sure the app is running through <code>npm run dev</code> so it can reach storage.json.</span>
+            <span>Couldn’t load your data: {error}</span>
             <button className="btn btn-sm" onClick={() => window.location.reload()}>Retry</button>
           </div>
         ) : <p className="muted">Loading your habits…</p>}
@@ -207,7 +207,7 @@ export default function App() {
       <main className="main">
         {status === 'error' && (
           <div className="banner-error">
-            <span>Couldn’t save to storage.json: {error}</span>
+            <span>Couldn’t save your changes: {error}</span>
             <button className="btn btn-sm" onClick={retry}>Retry</button>
           </div>
         )}
