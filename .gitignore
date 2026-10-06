@@ -1,0 +1,9 @@
+node_modules
+dist
+storage.json.tmp
+.env
+.env.*
+!.env.example
+
+# Personal habit data – created automatically on first run
+storage.json
